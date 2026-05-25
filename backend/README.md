@@ -1,6 +1,6 @@
 # Real-Time Streaming Analytics Chatbot Backend
 
-Backend implementation for Himanshu's user stories:
+Backend implementation for my(himanshu) user stories:
 
 - US-01 Project Setup
 - US-02 BI Chatbot Architecture
@@ -20,7 +20,7 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-Fill these values in `.env`:
+Fill these values in `.env`: (i have already shared everything in the teams chat just create your own groq api)
 
 ```env
 GROQ_API_KEY=...

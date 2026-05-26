@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Generator
 from typing import Any
 
@@ -148,7 +149,9 @@ def stream_chat_response(
 
             # Track SQL + chart metadata
             if name == "sql_executor":
-                last_sql_match = content
+                sql_match = re.search(r"['\"]sql['\"]:\s*['\"]([^'\"]+)", content)
+                if sql_match:
+                    last_sql = sql_match.group(1)
                 last_result = {"content": content}
             if name in ("chart_generator", "dynamic_chart", "plotly_viz"):
                 chart_type = name

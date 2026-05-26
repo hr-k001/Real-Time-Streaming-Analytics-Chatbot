@@ -113,6 +113,28 @@ def test_run_advanced_sql_unknown_mode():
     assert "error" in result
 
 
+def test_run_advanced_sql_join_mode():
+    from app.text2sql.advanced_sql import run_advanced_sql
+    result = run_advanced_sql(
+        mode="join",
+        table="dbo.orders o",
+        joins=[{"type": "INNER", "table": "dbo.customers c", "on": "o.customer_id = c.customer_id"}],
+        select_cols=["o.order_id", "c.customer_name"],
+    )
+    assert "error" not in result
+    assert "JOIN dbo.customers c" in result["sql"]
+
+
+def test_cte_query_validates():
+    from app.text2sql.advanced_sql import build_cte_query
+    sql = build_cte_query(
+        cte_name="recent_orders",
+        cte_body="SELECT TOP 10 order_id, customer_id FROM dbo.orders",
+        outer_query="SELECT * FROM recent_orders",
+    )
+    assert sql.startswith("WITH recent_orders")
+
+
 # ── US-11: Dynamic Chart Selection ───────────────────────────────────────────
 
 def test_chart_selection_temporal_x():

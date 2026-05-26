@@ -194,7 +194,7 @@ def build_join_query(
 # ── LangChain StructuredTool ──────────────────────────────────────────────────
 
 class AdvancedSQLInput(BaseModel):
-    mode: Literal["aggregation", "window", "date_filter", "join"] = Field(
+    mode: Literal["aggregation", "window", "date_filter", "join", "cte"] = Field(
         ..., description="Which SQL helper to invoke."
     )
     table: str = Field("", description="Fully qualified table name (e.g. dbo.orders).")
@@ -208,6 +208,11 @@ class AdvancedSQLInput(BaseModel):
     date_window: str = Field("last_7_days", description="Named time window (e.g. last_7_days, this_month).")
     where_clause: str = Field("", description="Optional raw WHERE condition.")
     having_clause: str = Field("", description="Optional raw HAVING condition.")
+    joins: list[dict[str, str]] = Field(default_factory=list, description="JOIN specs with type, table, and on keys.")
+    select_cols: list[str] = Field(default_factory=list, description="Columns to select for join mode.")
+    cte_name: str = Field("", description="CTE name for cte mode.")
+    cte_body: str = Field("", description="Inner SELECT statement for cte mode.")
+    outer_query: str = Field("", description="Outer SELECT statement for cte mode.")
     top_n: int = Field(100, ge=1, le=500)
 
 
@@ -224,6 +229,11 @@ def run_advanced_sql(
     date_window: str = "last_7_days",
     where_clause: str = "",
     having_clause: str = "",
+    joins: list[dict[str, str]] | None = None,
+    select_cols: list[str] | None = None,
+    cte_name: str = "",
+    cte_body: str = "",
+    outer_query: str = "",
     top_n: int = 100,
 ) -> dict[str, Any]:
     """Dispatch to the appropriate advanced SQL builder."""
@@ -251,8 +261,22 @@ def run_advanced_sql(
             fragment = build_date_filter(date_column, date_window)
             sql = f"SELECT TOP {top_n} *\nFROM {table}\nWHERE {fragment}"
             sql = query_validator.validate_or_raise(sql)
+        elif mode == "join":
+            sql = build_join_query(
+                base_table=table,
+                joins=joins or [],
+                select_cols=select_cols or ["*"],
+                where_clause=where_clause,
+                top_n=top_n,
+            )
+        elif mode == "cte":
+            sql = build_cte_query(
+                cte_name=cte_name,
+                cte_body=cte_body,
+                outer_query=outer_query,
+            )
         else:
-            return {"error": f"Unknown mode '{mode}'. Use: aggregation, window, date_filter."}
+            return {"error": f"Unknown mode '{mode}'. Use: aggregation, window, date_filter, join, cte."}
 
         return {"sql": sql, "mode": mode}
     except (QueryValidationError, ValueError) as exc:
@@ -266,7 +290,7 @@ advanced_sql_tool = StructuredTool.from_function(
     name="advanced_sql",
     description=(
         "Build complex T-SQL queries: GROUP BY aggregations, window functions (ROW_NUMBER, LAG, LEAD, SUM OVER), "
-        "and date-range filters. Returns a validated, ready-to-run T-SQL SELECT statement."
+        "date-range filters, joins, and CTEs. Returns a validated, ready-to-run T-SQL SELECT statement."
     ),
     func=run_advanced_sql,
     args_schema=AdvancedSQLInput,

@@ -88,15 +88,16 @@ class QueryValidator:
 
     def _check_structure(self, sql: str, report: ValidationReport) -> None:
         lowered = sql.lower()
-        if not lowered.lstrip().startswith("select"):
-            report.add_error("Query must begin with SELECT.")
+        stripped = lowered.lstrip()
+        if not (stripped.startswith("select") or stripped.startswith("with")):
+            report.add_error("Query must begin with SELECT or WITH.")
         if STACKED_STMT.search(sql):
             report.add_error("Stacked SQL statements (semicolons mid-query) are not allowed.")
 
     def _check_injection(self, sql: str, report: ValidationReport) -> None:
         match = FORBIDDEN_KEYWORDS.search(sql)
         if match:
-            report.add_error(f"Forbidden SQL keyword detected: '{match.group()}'.")
+            report.add_error(f"forbidden SQL keyword detected: '{match.group()}'.")
         if HEX_ENCODING.search(sql):
             report.add_error("Hex-encoded values detected — possible injection attempt.")
         if COMMENT_INJECTION.search(sql):
@@ -112,6 +113,8 @@ class QueryValidator:
     def _apply_top_guard(self, sql: str, report: ValidationReport) -> str:
         """Inject TOP N when neither TOP nor COUNT is present."""
         lowered = sql.lower()
+        if lowered.lstrip().startswith("with"):
+            return sql
         if " top " not in f" {lowered} " and " count(" not in lowered:
             sql = re.sub(
                 r"^select\s+",
@@ -144,12 +147,11 @@ class QueryValidator:
         cleaned = sql.strip().rstrip(";")
         report = ValidationReport(sql=cleaned)
 
-        self._check_structure(cleaned, report)
+        self._check_injection(cleaned, report)
         if not report.is_valid:
-            # No point continuing if the structure is wrong
             return report
 
-        self._check_injection(cleaned, report)
+        self._check_structure(cleaned, report)
         if not report.is_valid:
             return report
 

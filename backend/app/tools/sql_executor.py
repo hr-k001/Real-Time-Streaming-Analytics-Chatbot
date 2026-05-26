@@ -3,7 +3,7 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from app.cache.query_cache import get_cached_query, set_cached_query
+from app.cache.enhanced_query_cache import get_cached_result, set_cached_result
 from app.core.exceptions import QueryValidationError
 from app.db.azure_sql import execute_select
 from app.text2sql.validator import validate_select_query
@@ -16,13 +16,13 @@ class SQLExecutorInput(BaseModel):
 def run_sql_executor(sql: str) -> dict[str, Any]:
     try:
         safe_sql = validate_select_query(sql)
-        cached = get_cached_query(safe_sql)
+        cached = get_cached_result(safe_sql)
         if cached is not None:
-            return {**cached, "from_cache": True}
+            return cached
 
         result = execute_select(safe_sql)
         payload = {"sql": safe_sql, **result, "from_cache": False}
-        set_cached_query(safe_sql, payload)
+        set_cached_result(safe_sql, payload)
         return payload
     except QueryValidationError as exc:
         return {"error": str(exc), "from_cache": False}

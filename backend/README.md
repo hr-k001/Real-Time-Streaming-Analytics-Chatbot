@@ -67,6 +67,14 @@ POST /api/tools/data-summarizer
 POST /api/tools/export
 ```
 
+## Architecture Documentation
+
+For a detailed explanation of the backend entry point, Groq/LangGraph connection, tool calling flow, SQL execution, cache, and chat context, see:
+
+```text
+../docs/backend-architecture.md
+```
+
 ## Example Chat Request
 
 ```json

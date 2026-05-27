@@ -43,9 +43,24 @@ logger = logging.getLogger(__name__)
 
 def _sse(event: str, data: str) -> str:
     """Format a single SSE frame."""
-    # Escape newlines inside data so the SSE protocol isn't broken
     safe_data = data.replace("\n", " ")
     return f"event: {event}\ndata: {safe_data}\n\n"
+
+
+def _parse_tool_content(content: str) -> dict[str, Any] | None:
+    """Parse tool message content — tries JSON first, then Python literal_eval."""
+    if not isinstance(content, str):
+        return content if isinstance(content, dict) else None
+    try:
+        return json.loads(content)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    try:
+        import ast
+        result = ast.literal_eval(content)
+        return result if isinstance(result, dict) else None
+    except Exception:
+        return None
 
 
 # ── Schema loader (same as graph.py) ─────────────────────────────────────────
@@ -140,31 +155,46 @@ def stream_chat_response(
             name = getattr(msg, "name", "tool")
             content = getattr(msg, "content", "")
             yield _sse("tool_start", name)
-            # Summarise output (don't dump the full result)
-            summary = content[:200] + ("…" if len(content) > 200 else "")
+
+            # Parse tool output (LangGraph may use JSON or Python repr format)
+            parsed_output = _parse_tool_content(content)
+
+            if name in ("chart_generator", "dynamic_chart", "plotly_viz"):
+                # Emit full figure JSON as a dedicated chart event
+                figure = None
+                if isinstance(parsed_output, dict):
+                    figure = parsed_output.get("figure")
+                if figure:
+                    yield _sse("chart", json.dumps(figure))
+                chart_type = name
+                summary = f"Chart type: {parsed_output.get('chart_type', 'generated') if parsed_output else 'generated'}"
+            else:
+                # For non-chart tools, truncate the summary
+                summary = content[:300] + ("…" if len(content) > 300 else "")
+
             yield _sse("tool_end", json.dumps({"tool": name, "summary": summary}))
 
             record = {"name": name, "output": content}
             tool_results.append(record)
 
-            # Track SQL + chart metadata
+            # Track SQL metadata
             if name == "sql_executor":
                 sql_match = re.search(r"['\"]sql['\"]:\s*['\"]([^'\"]+)", content)
                 if sql_match:
                     last_sql = sql_match.group(1)
                 last_result = {"content": content}
-            if name in ("chart_generator", "dynamic_chart", "plotly_viz"):
-                chart_type = name
 
     # ── Stream the final assistant answer token-by-token ──────────────────
     final_answer = messages[-1].content if messages else "I could not generate a response."
 
-    # Simulate token streaming over the final answer text
-    # (Groq streaming within the agent loop is complex; we stream the assembled answer)
+    # Stream the final answer word-by-word in small chunks
     words = final_answer.split()
-    chunk_size = 3  # emit 3 words at a time for smooth UX
+    chunk_size = 3
     for i in range(0, len(words), chunk_size):
-        chunk = " ".join(words[i:i + chunk_size]) + " "
+        # The trailing space separates chunks; frontend must NOT add an extra space
+        chunk = " ".join(words[i:i + chunk_size])
+        if i + chunk_size < len(words):
+            chunk += " "  # space between chunks, not after the last
         yield _sse("token", chunk)
 
     # ── Persist to memory ─────────────────────────────────────────────────

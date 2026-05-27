@@ -1,7 +1,8 @@
 """
 app/tools/__init__.py
 ----------------------
-Registers ALL LangGraph tools — Himanshu's original set PLUS Binit's additions.
+Registers ALL LangGraph tools — Himanshu's original set, Binit's additions,
+and the new Feature 3 anomaly detection tool.
 Import REGISTERED_TOOLS anywhere to get the full tool list for the agent.
 """
 # ── Himanshu's tools (US-03 to US-07) ────────────────────────────────────────
@@ -17,6 +18,12 @@ from app.visualization.dynamic_chart import dynamic_chart_tool
 from app.visualization.plotly_integration import plotly_viz_tool
 from app.cache.enhanced_query_cache import cache_management_tool
 
+# ── Feature 2: Spreadsheet Integration ───────────────────────────────────────
+from app.data_sources.spreadsheet_handler import spreadsheet_query_tool
+
+# ── Feature 3: Anomaly Detection ──────────────────────────────────────────────
+from app.analytics.anomaly_detector import anomaly_detection_tool
+
 REGISTERED_TOOLS = [
     # Core data tools
     sql_executor_tool,
@@ -29,9 +36,12 @@ REGISTERED_TOOLS = [
     dynamic_chart_tool,        # US-11: smart type selection
     plotly_viz_tool,           # US-12: themed multi-series
 
-    # Advanced SQL (Binit US-10)
-    advanced_sql_tool,
-
     # Cache management (Binit US-16)
     cache_management_tool,
+
+    # Anomaly detection (Feature 3)
+    anomaly_detection_tool,
+
+    # Spreadsheet integration (Feature 2)
+    spreadsheet_query_tool,
 ]

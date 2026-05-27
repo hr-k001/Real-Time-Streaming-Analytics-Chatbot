@@ -122,7 +122,7 @@ class PlotlyVizInput(BaseModel):
     data: list[dict[str, Any]] = Field(..., description="Tabular query result rows.")
     question: str = Field("", description="User question to aid chart type selection.")
     x: str | None = Field(None, description="X-axis column.")
-    y_cols: list[str] = Field(default_factory=list, description="One or more Y-axis columns (multi-series if >1).")
+    y_cols: list[str] | None = Field(None, description="One or more Y-axis columns (multi-series if >1). Optional — auto-detected if omitted.")
     chart_type: str = Field("auto", description="Chart type or 'auto'.")
     title: str = Field("Analytics Result", description="Chart title.")
     palette: str = Field("default", description="Color palette: default, blue, green, warm, pastel.")

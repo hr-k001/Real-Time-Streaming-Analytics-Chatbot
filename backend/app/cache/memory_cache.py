@@ -35,5 +35,28 @@ class MemoryCache:
         with self._lock:
             self._store.pop(key, None)
 
+    def get_expiry_info(self, key: str) -> dict[str, float] | None:
+        """
+        Return expiry metadata for a key without consuming it.
+
+        Returns a dict with `expires_at` and `remaining_seconds`,
+        or None if the key is absent or already expired.
+        """
+        with self._lock:
+            entry = self._store.get(key)
+            if entry is None:
+                return None
+            remaining = entry.expires_at - time.time()
+            if remaining <= 0:
+                self._store.pop(key, None)
+                return None
+            return {"expires_at": entry.expires_at, "remaining_seconds": remaining}
+
+    def all_keys(self) -> list[str]:
+        """Return a snapshot of all non-expired cache keys."""
+        now = time.time()
+        with self._lock:
+            return [k for k, e in self._store.items() if e.expires_at > now]
+
 
 cache = MemoryCache()

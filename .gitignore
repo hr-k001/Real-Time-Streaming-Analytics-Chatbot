@@ -5,3 +5,7 @@ __pycache__/
 .pytest_cache/
 exports/
 backend/exports/
+venv/
+node_modules/
+dist/
+reports/

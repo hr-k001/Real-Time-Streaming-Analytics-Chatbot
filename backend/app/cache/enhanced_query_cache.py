@@ -57,6 +57,12 @@ _stats = CacheStats()
 # key: cache_key  value: list of table names referenced in the SQL
 _key_table_index: dict[str, list[str]] = {}
 
+# key: cache_key  value: original SQL string (used by the background refresher)
+_key_sql_index: dict[str, str] = {}
+
+# key: cache_key  value: TTL used when the entry was stored
+_key_ttl_index: dict[str, int] = {}
+
 
 # ── Key generation ────────────────────────────────────────────────────────────
 
@@ -102,13 +108,46 @@ def set_cached_result(
     params: dict[str, Any] | None = None,
     ttl: int | None = None,
 ) -> None:
-    """Store a query result in the cache and update the table index."""
+    """Store a query result in the cache and update all indexes."""
     key = make_cache_key(sql, params)
     effective_ttl = ttl if ttl is not None else settings.CACHE_TTL_SECONDS
     cache.set(key, value, effective_ttl)
     _key_table_index[key] = _extract_tables(sql)
+    _key_sql_index[key] = sql
+    _key_ttl_index[key] = effective_ttl
     _stats.sets += 1
     logger.debug("Cache SET:  %s (ttl=%ds)", key, effective_ttl)
+
+
+def get_near_expiry_keys(threshold_pct: float = 0.8) -> list[dict[str, Any]]:
+    """
+    Return metadata for cache keys whose TTL is more than `threshold_pct` consumed.
+
+    For example, with threshold_pct=0.8 and a 300s TTL, a key is "near expiry"
+    when fewer than 60s remain (i.e. 80% of the TTL has elapsed).
+
+    Returns a list of dicts with keys: cache_key, sql, remaining_seconds, original_ttl.
+    """
+    near_expiry: list[dict[str, Any]] = []
+    for key, sql in list(_key_sql_index.items()):
+        info = cache.get_expiry_info(key)
+        if info is None:
+            # Key already expired — clean up indexes
+            _key_table_index.pop(key, None)
+            _key_sql_index.pop(key, None)
+            _key_ttl_index.pop(key, None)
+            continue
+        original_ttl = _key_ttl_index.get(key, settings.CACHE_TTL_SECONDS)
+        elapsed_pct = 1.0 - (info["remaining_seconds"] / original_ttl)
+        if elapsed_pct >= threshold_pct:
+            near_expiry.append({
+                "cache_key": key,
+                "sql": sql,
+                "remaining_seconds": round(info["remaining_seconds"], 1),
+                "original_ttl": original_ttl,
+                "elapsed_pct": round(elapsed_pct * 100, 1),
+            })
+    return near_expiry
 
 
 def invalidate_by_table(table_name: str) -> int:
@@ -121,7 +160,9 @@ def invalidate_by_table(table_name: str) -> int:
     to_delete = [k for k, tables in _key_table_index.items() if table_lower in tables]
     for key in to_delete:
         cache.delete(key)
-        del _key_table_index[key]
+        _key_table_index.pop(key, None)
+        _key_sql_index.pop(key, None)
+        _key_ttl_index.pop(key, None)
         _stats.invalidations += 1
     if to_delete:
         logger.info("Invalidated %d cache entries for table '%s'", len(to_delete), table_name)
@@ -134,6 +175,8 @@ def invalidate_all() -> int:
     for key in list(_key_table_index.keys()):
         cache.delete(key)
     _key_table_index.clear()
+    _key_sql_index.clear()
+    _key_ttl_index.clear()
     _stats.invalidations += count
     logger.info("Cache fully flushed (%d entries removed)", count)
     return count

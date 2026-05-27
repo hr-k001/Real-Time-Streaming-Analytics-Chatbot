@@ -29,8 +29,11 @@ class Settings(BaseSettings):
     CACHE_BACKEND: Literal["memory"] = "memory"
     CACHE_TTL_SECONDS: int = 300
     CHAT_TTL_SECONDS: int = 86400
+    CACHE_REFRESH_INTERVAL_SECONDS: int = 60
+    CACHE_REFRESH_THRESHOLD_PCT: float = 0.8
 
     EXPORT_DIR: str = "exports"
+    REPORTS_DIR: str = "reports"
 
     model_config = SettingsConfigDict(
         env_file=".env",

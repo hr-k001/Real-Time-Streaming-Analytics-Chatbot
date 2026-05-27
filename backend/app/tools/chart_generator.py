@@ -33,16 +33,29 @@ def generate_chart(
     chart_type: ChartType = "auto",
     title: str = "Analytics Result",
 ) -> dict[str, Any]:
+    from app.core.error_handler import structured_error
+
     try:
         if not data:
-            return {"error": "No data provided for chart generation."}
+            return structured_error(
+                tool="chart_generator",
+                message="No data provided for chart generation.",
+                error_type="EmptyDataError",
+                suggestion="Ensure the SQL query returns at least one row before generating a chart.",
+            )
 
         numeric = _numeric_columns(data)
         categorical = _categorical_columns(data)
         x_col = x or (categorical[0] if categorical else next(iter(data[0].keys())))
         y_col = y or (numeric[0] if numeric else None)
         if not y_col:
-            return {"error": "No numeric column found for chart values."}
+            return structured_error(
+                tool="chart_generator",
+                message="No numeric column found for chart values.",
+                error_type="NoNumericColumn",
+                suggestion="Make sure the query result includes at least one numeric (int/float) column.",
+                retries_attempted=0,
+            )
 
         selected = chart_type
         if selected == "auto":
@@ -75,7 +88,12 @@ def generate_chart(
             },
         }
     except Exception as exc:
-        return {"error": f"Chart generation failed: {exc}"}
+        return structured_error(
+            tool="chart_generator",
+            message=f"Chart generation failed: {exc}",
+            error_type="RenderError",
+            suggestion="Try specifying explicit x and y column names, or use the data_summarizer tool to inspect the data shape first.",
+        )
 
 
 chart_generator_tool = StructuredTool.from_function(

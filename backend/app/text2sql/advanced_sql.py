@@ -82,7 +82,11 @@ def build_aggregation_query(
         A validated T-SQL SELECT query string.
     """
     if agg_func == "COUNT_DISTINCT":
-        agg_expr = f"COUNT(DISTINCT {metric_col})"
+        agg_expr = f"COUNT(DISTINCT {metric_col})" if metric_col else "COUNT(*)"
+    elif agg_func == "COUNT" and not metric_col:
+        agg_expr = "COUNT(*)"
+    elif not metric_col:
+        agg_expr = f"{agg_func}(*)"
     else:
         agg_expr = f"{agg_func}({metric_col})"
 
@@ -201,19 +205,20 @@ class AdvancedSQLInput(BaseModel):
     metric_col: str = Field("", description="Column to aggregate or apply window function to.")
     agg_func: str = Field("SUM", description="Aggregation function: SUM, COUNT, AVG, MIN, MAX, COUNT_DISTINCT.")
     group_by_cols: list[str] = Field(default_factory=list, description="GROUP BY columns.")
-    partition_cols: list[str] = Field(default_factory=list, description="PARTITION BY columns for window functions.")
+    # Use Optional[list] so Groq's strict validator doesn't require them in every call
+    partition_cols: list[str] | None = Field(None, description="PARTITION BY columns for window functions. Only needed for window mode.")
     order_col: str = Field("", description="ORDER BY column inside OVER() clause.")
     window_func: str = Field("ROW_NUMBER", description="Window function: ROW_NUMBER, RANK, SUM, AVG, LAG, LEAD.")
     date_column: str = Field("", description="Date column for date filter mode.")
     date_window: str = Field("last_7_days", description="Named time window (e.g. last_7_days, this_month).")
     where_clause: str = Field("", description="Optional raw WHERE condition.")
     having_clause: str = Field("", description="Optional raw HAVING condition.")
-    joins: list[dict[str, str]] = Field(default_factory=list, description="JOIN specs with type, table, and on keys.")
+    joins: list[dict[str, str]] | None = Field(None, description="JOIN specs with type/table/on keys. Only needed for join mode.")
     select_cols: list[str] = Field(default_factory=list, description="Columns to select for join mode.")
     cte_name: str = Field("", description="CTE name for cte mode.")
     cte_body: str = Field("", description="Inner SELECT statement for cte mode.")
     outer_query: str = Field("", description="Outer SELECT statement for cte mode.")
-    top_n: int = Field(100, ge=1, le=500)
+    top_n: int = Field(100, ge=1, le=1000)
 
 
 def run_advanced_sql(
@@ -222,14 +227,14 @@ def run_advanced_sql(
     metric_col: str = "",
     agg_func: str = "SUM",
     group_by_cols: list[str] | None = None,
-    partition_cols: list[str] | None = None,
+    partition_cols: list[str] | None = None,  # Optional — only window mode
     order_col: str = "",
     window_func: str = "ROW_NUMBER",
     date_column: str = "",
     date_window: str = "last_7_days",
     where_clause: str = "",
     having_clause: str = "",
-    joins: list[dict[str, str]] | None = None,
+    joins: list[dict[str, str]] | None = None,  # Optional — only join mode
     select_cols: list[str] | None = None,
     cte_name: str = "",
     cte_body: str = "",

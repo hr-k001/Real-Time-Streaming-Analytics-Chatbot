@@ -32,6 +32,7 @@ from app.cache.enhanced_query_cache import (
     invalidate_all,
     invalidate_by_table,
 )
+from app.cache.cache_refresher import get_freshness_report
 from app.streaming.sse_streamer import stream_chat_response
 from app.text2sql.text2sql_pipeline import text2sql_pipeline
 from app.text2sql.query_validator import validate_query_report
@@ -171,3 +172,43 @@ def cache_flush() -> dict[str, Any]:
     """US-16 — Flush the entire query result cache."""
     count = invalidate_all()
     return {"flushed": count}
+
+
+# ── Feature 1: Cache TTL Refresh ─────────────────────────────────────────────
+
+@router.get("/cache/freshness")
+def cache_freshness() -> dict[str, Any]:
+    """
+    Feature 1 — List cache keys that are near their TTL expiry.
+
+    Returns entries where elapsed time >= CACHE_REFRESH_THRESHOLD_PCT of the TTL.
+    The background refresher will proactively re-run these queries.
+    """
+    entries = get_freshness_report()
+    return {"near_expiry_count": len(entries), "entries": entries}
+
+
+class ManualRefreshRequest(BaseModel):
+    table_name: str = Field(
+        "",
+        description="Table name whose queries should be force-refreshed. "
+                    "Leave empty to refresh all near-expiry keys.",
+    )
+
+
+@router.post("/cache/refresh")
+async def cache_refresh(request: ManualRefreshRequest) -> dict[str, Any]:
+    """
+    Feature 1 — Trigger an immediate cache refresh outside the background interval.
+
+    If table_name is provided, only queries touching that table are refreshed.
+    Otherwise all near-expiry keys are refreshed.
+    """
+    from app.cache import cache_refresher as refresher
+    await refresher._do_refresh()
+    entries = get_freshness_report()
+    return {
+        "status": "refresh triggered",
+        "table_name": request.table_name or "all",
+        "remaining_near_expiry": len(entries),
+    }

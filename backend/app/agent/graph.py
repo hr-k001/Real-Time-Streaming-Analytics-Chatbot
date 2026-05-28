@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import json
 import logging
+import re
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -15,9 +16,14 @@ from app.conversation.context_manager import prepare_question, update_context_af
 from app.core.config import settings
 from app.core.error_handler import structured_error
 from app.text2sql.schema_registry import format_schema_for_prompt, load_database_schema
-from app.tools import REGISTERED_TOOLS
+from app.tools.chart_generator import generate_chart
+from app.tools.sql_executor import run_sql_executor
+from app.tools import CHAT_AGENT_TOOLS
 
 logger = logging.getLogger(__name__)
+
+
+CHART_REQUEST_RE = re.compile(r"\b(chart|graph|plot|visuali[sz]e|bar|line|pie|scatter)\b", re.IGNORECASE)
 
 
 def _parse_content(content: str) -> dict[str, Any] | None:
@@ -45,9 +51,13 @@ def _load_schema_text() -> str:
         return ""
 
 
+def _wants_chart(message: str) -> bool:
+    return bool(CHART_REQUEST_RE.search(message))
+
+
 def _to_lc_messages(chat_id: str, message: str, context_summary: str = "") -> list[Any]:
     state = get_chat_state(chat_id)
-    history = state.get("messages", [])[-8:]
+    history = state.get("messages", [])[-settings.CHAT_HISTORY_MESSAGES:]
     system_content = build_system_prompt(_load_schema_text())
     if context_summary and context_summary != "No prior context.":
         system_content += f"\n\nConversation context:\n{context_summary}"
@@ -80,10 +90,14 @@ def run_chat(message: str, chat_id: str | None = None) -> dict[str, Any]:
         model=settings.GROQ_MODEL,
         temperature=0,
         api_key=settings.GROQ_API_KEY,
+        max_retries=settings.GROQ_MAX_RETRIES,
     )
-    agent = create_react_agent(llm, REGISTERED_TOOLS)
+    agent = create_react_agent(llm, CHAT_AGENT_TOOLS)
     try:
-        result = agent.invoke({"messages": _to_lc_messages(active_chat_id, question, prepared["context_summary"])})
+        result = agent.invoke(
+            {"messages": _to_lc_messages(active_chat_id, question, prepared["context_summary"])},
+            config={"recursion_limit": settings.AGENT_RECURSION_LIMIT},
+        )
     except Exception as exc:
         logger.error("Agent invocation failed for chat_id=%s: %s", active_chat_id, exc)
         err = structured_error(
@@ -112,6 +126,11 @@ def run_chat(message: str, chat_id: str | None = None) -> dict[str, Any]:
     chart_type = None
 
     for item in messages:
+        if getattr(item, "type", "") == "ai":
+            for call in getattr(item, "tool_calls", []) or []:
+                if call.get("name") == "sql_executor":
+                    args = call.get("args") or {}
+                    last_sql = args.get("sql") or last_sql
         if getattr(item, "type", "") == "tool":
             name = getattr(item, "name", "tool")
             content = getattr(item, "content", "")
@@ -136,6 +155,24 @@ def run_chat(message: str, chat_id: str | None = None) -> dict[str, Any]:
                     sql_marker = "'sql': '"
                     if sql_marker in content:
                         last_sql = content.split(sql_marker, 1)[1].split("'", 1)[0]
+
+    if chart is None and _wants_chart(message) and (not isinstance(last_result, dict) or not last_result.get("rows")) and last_sql:
+        last_result = run_sql_executor(last_sql)
+        data = last_result
+
+    if chart is None and _wants_chart(message) and isinstance(last_result, dict):
+        chart_result = generate_chart(last_result, title="Analytics Result")
+        tool_calls.append(
+            {
+                "name": "chart_generator",
+                "input": {"data": {"columns": last_result.get("columns"), "rows": last_result.get("rows")}},
+                "output": chart_result,
+                "error": chart_result.get("error") if isinstance(chart_result, dict) else None,
+            }
+        )
+        if isinstance(chart_result, dict) and "figure" in chart_result:
+            chart = chart_result["figure"]
+            chart_type = "chart_generator"
 
     append_message(active_chat_id, "user", message)
     append_message(active_chat_id, "assistant", answer)

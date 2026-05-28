@@ -14,6 +14,9 @@ class Settings(BaseSettings):
 
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_MAX_RETRIES: int = 0
+    AGENT_RECURSION_LIMIT: int = 8
+    CHAT_HISTORY_MESSAGES: int = 4
 
     AZURE_SQL_SERVER: str = "streaming-analytic.database.windows.net"
     AZURE_SQL_DATABASE: str = "real-time-chatbot"

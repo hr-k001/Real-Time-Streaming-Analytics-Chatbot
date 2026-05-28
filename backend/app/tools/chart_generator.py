@@ -3,11 +3,19 @@ from typing import Any, Literal
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
+from app.visualization.data_shapes import coerce_rows
+
 ChartType = Literal["auto", "bar", "line", "scatter", "pie"]
 
 
 class ChartGeneratorInput(BaseModel):
-    data: list[dict[str, Any]] = Field(..., description="Tabular query result rows.")
+    data: Any = Field(
+        ...,
+        description=(
+            "Tabular rows as an array of objects, or a SQL result object containing "
+            "a rows array. Examples: [{...}] or {columns: [...], rows: [{...}]}."
+        ),
+    )
     x: str | None = Field(None, description="Column to use for the x-axis or labels.")
     y: str | None = Field(None, description="Column to use for the y-axis or values.")
     chart_type: ChartType = "auto"
@@ -27,7 +35,7 @@ def _categorical_columns(rows: list[dict[str, Any]]) -> list[str]:
 
 
 def generate_chart(
-    data: list[dict[str, Any]],
+    data: Any,
     x: str | None = None,
     y: str | None = None,
     chart_type: ChartType = "auto",
@@ -36,6 +44,7 @@ def generate_chart(
     from app.core.error_handler import structured_error
 
     try:
+        rows = coerce_rows(data)
         if not data:
             return structured_error(
                 tool="chart_generator",
@@ -43,10 +52,17 @@ def generate_chart(
                 error_type="EmptyDataError",
                 suggestion="Ensure the SQL query returns at least one row before generating a chart.",
             )
+        if not rows:
+            return structured_error(
+                tool="chart_generator",
+                message="Chart data must be rows or a SQL result object containing rows.",
+                error_type="InvalidDataShape",
+                suggestion="Pass data as [{...}] or as {columns: [...], rows: [{...}]}.",
+            )
 
-        numeric = _numeric_columns(data)
-        categorical = _categorical_columns(data)
-        x_col = x or (categorical[0] if categorical else next(iter(data[0].keys())))
+        numeric = _numeric_columns(rows)
+        categorical = _categorical_columns(rows)
+        x_col = x or (categorical[0] if categorical else next(iter(rows[0].keys())))
         y_col = y or (numeric[0] if numeric else None)
         if not y_col:
             return structured_error(
@@ -59,15 +75,15 @@ def generate_chart(
 
         selected = chart_type
         if selected == "auto":
-            if len(data) <= 6 and x_col in categorical:
+            if len(rows) <= 6 and x_col in categorical:
                 selected = "pie"
             elif any(token in x_col.lower() for token in ["date", "month", "year", "time"]):
                 selected = "line"
             else:
                 selected = "bar"
 
-        labels = [row.get(x_col) for row in data]
-        values = [row.get(y_col) for row in data]
+        labels = [row.get(x_col) for row in rows]
+        values = [row.get(y_col) for row in rows]
 
         if selected == "pie":
             traces = [{"type": "pie", "labels": labels, "values": values}]

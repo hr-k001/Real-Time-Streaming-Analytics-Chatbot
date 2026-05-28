@@ -34,9 +34,12 @@ from app.conversation.context_manager import (
 )
 from app.core.config import settings
 from app.text2sql.schema_registry import format_schema_for_prompt, load_database_schema
-from app.tools import REGISTERED_TOOLS
+from app.tools.chart_generator import generate_chart
+from app.tools.sql_executor import run_sql_executor
+from app.tools import CHAT_AGENT_TOOLS
 
 logger = logging.getLogger(__name__)
+CHART_REQUEST_RE = re.compile(r"\b(chart|graph|plot|visuali[sz]e|bar|line|pie|scatter)\b", re.IGNORECASE)
 
 
 # ── SSE helpers ───────────────────────────────────────────────────────────────
@@ -61,6 +64,10 @@ def _parse_tool_content(content: str) -> dict[str, Any] | None:
         return result if isinstance(result, dict) else None
     except Exception:
         return None
+
+
+def _wants_chart(message: str) -> bool:
+    return bool(CHART_REQUEST_RE.search(message))
 
 
 # ── Schema loader (same as graph.py) ─────────────────────────────────────────
@@ -111,7 +118,7 @@ def stream_chat_response(
         system_content += f"\n\nConversation context:\n{context_summary}"
 
     state = get_chat_state(active_chat_id)
-    history = state.get("messages", [])[-8:]
+    history = state.get("messages", [])[-settings.CHAT_HISTORY_MESSAGES:]
     lc_messages: list[Any] = [SystemMessage(content=system_content)]
     for item in history:
         if item["role"] == "user":
@@ -125,17 +132,21 @@ def stream_chat_response(
         model=settings.GROQ_MODEL,
         temperature=0,
         api_key=settings.GROQ_API_KEY,
-        streaming=True,
+        streaming=False,
+        max_retries=settings.GROQ_MAX_RETRIES,
     )
 
     from langgraph.prebuilt import create_react_agent
 
     # Use non-streaming agent for tool calls (tool calls don't support token streaming),
     # then stream the final answer token-by-token.
-    agent = create_react_agent(llm, REGISTERED_TOOLS)
+    agent = create_react_agent(llm, CHAT_AGENT_TOOLS)
 
     try:
-        result = agent.invoke({"messages": lc_messages})
+        result = agent.invoke(
+            {"messages": lc_messages},
+            config={"recursion_limit": settings.AGENT_RECURSION_LIMIT},
+        )
     except Exception as exc:
         logger.exception("Streaming agent invoke failed")
         yield _sse("error", str(exc))
@@ -148,13 +159,22 @@ def stream_chat_response(
     last_sql: str | None = None
     last_result: dict[str, Any] | None = None
     chart_type: str | None = None
+    emitted_tool_counts: dict[str, int] = {}
 
     for msg in messages:
         msg_type = getattr(msg, "type", "")
+        if msg_type == "ai":
+            for call in getattr(msg, "tool_calls", []) or []:
+                if call.get("name") == "sql_executor":
+                    args = call.get("args") or {}
+                    last_sql = args.get("sql") or last_sql
         if msg_type == "tool":
             name = getattr(msg, "name", "tool")
             content = getattr(msg, "content", "")
-            yield _sse("tool_start", name)
+            emitted_tool_counts[name] = emitted_tool_counts.get(name, 0) + 1
+            emit_tool_event = emitted_tool_counts[name] == 1
+            if emit_tool_event:
+                yield _sse("tool_start", name)
 
             # Parse tool output (LangGraph may use JSON or Python repr format)
             parsed_output = _parse_tool_content(content)
@@ -172,17 +192,40 @@ def stream_chat_response(
                 # For non-chart tools, truncate the summary
                 summary = content[:300] + ("…" if len(content) > 300 else "")
 
-            yield _sse("tool_end", json.dumps({"tool": name, "summary": summary}))
+            if emit_tool_event:
+                yield _sse("tool_end", json.dumps({"tool": name, "summary": summary}))
 
             record = {"name": name, "output": content}
             tool_results.append(record)
 
             # Track SQL metadata
             if name == "sql_executor":
-                sql_match = re.search(r"['\"]sql['\"]:\s*['\"]([^'\"]+)", content)
-                if sql_match:
-                    last_sql = sql_match.group(1)
-                last_result = {"content": content}
+                if isinstance(parsed_output, dict):
+                    last_sql = parsed_output.get("sql") or last_sql
+                if not last_sql:
+                    sql_match = re.search(r"['\"]sql['\"]:\s*['\"]([^'\"]+)", content)
+                    if sql_match:
+                        last_sql = sql_match.group(1)
+                last_result = parsed_output if isinstance(parsed_output, dict) else {"content": content}
+
+    if _wants_chart(message) and (not isinstance(last_result, dict) or not last_result.get("rows")) and last_sql:
+        last_result = run_sql_executor(last_sql)
+
+    if _wants_chart(message) and isinstance(last_result, dict) and last_result.get("rows"):
+        already_had_chart = chart_type in ("chart_generator", "dynamic_chart", "plotly_viz")
+        chart_result = generate_chart(last_result, title="Analytics Result")
+        if already_had_chart:
+            chart_type = "chart_generator"
+        else:
+            yield _sse("tool_start", "chart_generator")
+        if isinstance(chart_result, dict) and chart_result.get("figure"):
+            yield _sse("chart", json.dumps(chart_result["figure"]))
+            chart_type = "chart_generator"
+            summary = f"Chart type: {chart_result.get('chart_type', 'generated')}"
+        else:
+            summary = str(chart_result)
+        if not already_had_chart:
+            yield _sse("tool_end", json.dumps({"tool": "chart_generator", "summary": summary}))
 
     # ── Stream the final assistant answer token-by-token ──────────────────
     final_answer = messages[-1].content if messages else "I could not generate a response."

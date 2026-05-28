@@ -45,3 +45,16 @@ REGISTERED_TOOLS = [
     # Spreadsheet integration (Feature 2)
     spreadsheet_query_tool,
 ]
+
+# Normal chat agent tools. Keep feature tools available, but use one chart tool
+# to avoid repeated visualization-tool loops.
+CHAT_AGENT_TOOLS = [
+    sql_executor_tool,
+    rest_api_caller_tool,
+    export_tool,
+    chart_generator_tool,
+    advanced_sql_tool,
+    cache_management_tool,
+    anomaly_detection_tool,
+    spreadsheet_query_tool,
+]

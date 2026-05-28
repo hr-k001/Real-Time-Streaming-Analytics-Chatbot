@@ -36,6 +36,39 @@ def test_chart_generator_auto_bar_or_pie():
     assert result["chart_type"] in {"bar", "pie"}
 
 
+def test_chart_generator_accepts_sql_result_object():
+    result = generate_chart(
+        {
+            "columns": ["product_name", "price"],
+            "rows": [
+                {"product_name": "Analytics Pro", "price": 199},
+                {"product_name": "Dashboard Add-on", "price": 79},
+            ],
+        },
+        x="product_name",
+        y="price",
+    )
+    assert "figure" in result
+    trace = result["figure"]["data"][0]
+    assert trace["labels"] == ["Analytics Pro", "Dashboard Add-on"]
+    assert trace["values"] == [199, 79]
+
+
+def test_chart_generator_accepts_column_row_arrays():
+    result = generate_chart(
+        {
+            "columns": ["product_name", "price"],
+            "rows": [["Analytics Pro", 199], ["Dashboard Add-on", 79]],
+        },
+        x="product_name",
+        y="price",
+    )
+    assert "figure" in result
+    trace = result["figure"]["data"][0]
+    assert trace["labels"] == ["Analytics Pro", "Dashboard Add-on"]
+    assert trace["values"] == [199, 79]
+
+
 def test_sql_executor_uses_enhanced_cache(monkeypatch):
     from app.cache.enhanced_query_cache import get_cached_result, invalidate_all
     from app.tools import sql_executor

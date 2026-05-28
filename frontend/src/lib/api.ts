@@ -1,5 +1,10 @@
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
+function apiPath(path: string): string {
+  if (!BASE) return path;
+  return `${BASE.replace(/\/$/, '')}${path}`;
+}
+
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
@@ -107,9 +112,16 @@ export const generateReport = (
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, title }),
-  }).then(r => json(r));
+  })
+    .then(r => json<{ report_id: string; title: string; download_url: string }>(r))
+    .then(report => ({
+      ...report,
+      download_url: report.download_url.startsWith('http')
+        ? report.download_url
+        : apiPath(report.download_url),
+    }));
 
-export const reportDownloadUrl = (reportId: string) => `${BASE}/api/reports/${reportId}`;
+export const reportDownloadUrl = (reportId: string) => apiPath(`/api/reports/${reportId}`);
 
 // ── Analytics ──────────────────────────────────────────────────────────────────
 

@@ -12,6 +12,7 @@ export function ChatInterface() {
   const [showUpload, setShowUpload] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
   const [reportUrl, setReportUrl] = useState<string | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
   const bottomRef  = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -56,11 +57,19 @@ export function ChatInterface() {
   const handleGenerateReport = useCallback(async () => {
     if (!chatId || generatingReport) return;
     setGeneratingReport(true);
+    setReportError(null);
     try {
       const res = await generateReport(chatId, 'Chat Session Report');
       setReportUrl(res.download_url);
+      const link = document.createElement('a');
+      link.href = res.download_url;
+      link.download = `chat-report-${chatId.slice(0, 8)}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
     } catch (err) {
       console.error('Report generation failed:', err);
+      setReportError(err instanceof Error ? err.message : 'Report generation failed');
     } finally {
       setGeneratingReport(false);
     }
@@ -137,6 +146,14 @@ export function ChatInterface() {
             style={{ background: 'rgba(248,113,113,0.08)', borderColor: 'var(--red)', color: 'var(--red)' }}
           >
             {error}
+          </div>
+        )}
+        {reportError && (
+          <div
+            className="flex items-center gap-2 px-4 py-3 rounded-lg text-[13px] border"
+            style={{ background: 'rgba(248,113,113,0.08)', borderColor: 'var(--red)', color: 'var(--red)' }}
+          >
+            {reportError}
           </div>
         )}
         <div ref={bottomRef} />

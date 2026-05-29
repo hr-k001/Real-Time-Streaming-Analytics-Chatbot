@@ -3,11 +3,19 @@ from typing import Any, Literal
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
+from app.visualization.data_shapes import coerce_rows
+
 ChartType = Literal["auto", "bar", "line", "scatter", "pie"]
 
 
 class ChartGeneratorInput(BaseModel):
-    data: list[dict[str, Any]] = Field(..., description="Tabular query result rows.")
+    data: Any = Field(
+        ...,
+        description=(
+            "Tabular rows as an array of objects, or a SQL result object containing "
+            "a rows array. Examples: [{...}] or {columns: [...], rows: [{...}]}."
+        ),
+    )
     x: str | None = Field(None, description="Column to use for the x-axis or labels.")
     y: str | None = Field(None, description="Column to use for the y-axis or values.")
     chart_type: ChartType = "auto"
@@ -27,34 +35,55 @@ def _categorical_columns(rows: list[dict[str, Any]]) -> list[str]:
 
 
 def generate_chart(
-    data: list[dict[str, Any]],
+    data: Any,
     x: str | None = None,
     y: str | None = None,
     chart_type: ChartType = "auto",
     title: str = "Analytics Result",
 ) -> dict[str, Any]:
-    try:
-        if not data:
-            return {"error": "No data provided for chart generation."}
+    from app.core.error_handler import structured_error
 
-        numeric = _numeric_columns(data)
-        categorical = _categorical_columns(data)
-        x_col = x or (categorical[0] if categorical else next(iter(data[0].keys())))
+    try:
+        rows = coerce_rows(data)
+        if not data:
+            return structured_error(
+                tool="chart_generator",
+                message="No data provided for chart generation.",
+                error_type="EmptyDataError",
+                suggestion="Ensure the SQL query returns at least one row before generating a chart.",
+            )
+        if not rows:
+            return structured_error(
+                tool="chart_generator",
+                message="Chart data must be rows or a SQL result object containing rows.",
+                error_type="InvalidDataShape",
+                suggestion="Pass data as [{...}] or as {columns: [...], rows: [{...}]}.",
+            )
+
+        numeric = _numeric_columns(rows)
+        categorical = _categorical_columns(rows)
+        x_col = x or (categorical[0] if categorical else next(iter(rows[0].keys())))
         y_col = y or (numeric[0] if numeric else None)
         if not y_col:
-            return {"error": "No numeric column found for chart values."}
+            return structured_error(
+                tool="chart_generator",
+                message="No numeric column found for chart values.",
+                error_type="NoNumericColumn",
+                suggestion="Make sure the query result includes at least one numeric (int/float) column.",
+                retries_attempted=0,
+            )
 
         selected = chart_type
         if selected == "auto":
-            if len(data) <= 6 and x_col in categorical:
+            if len(rows) <= 6 and x_col in categorical:
                 selected = "pie"
             elif any(token in x_col.lower() for token in ["date", "month", "year", "time"]):
                 selected = "line"
             else:
                 selected = "bar"
 
-        labels = [row.get(x_col) for row in data]
-        values = [row.get(y_col) for row in data]
+        labels = [row.get(x_col) for row in rows]
+        values = [row.get(y_col) for row in rows]
 
         if selected == "pie":
             traces = [{"type": "pie", "labels": labels, "values": values}]
@@ -75,7 +104,12 @@ def generate_chart(
             },
         }
     except Exception as exc:
-        return {"error": f"Chart generation failed: {exc}"}
+        return structured_error(
+            tool="chart_generator",
+            message=f"Chart generation failed: {exc}",
+            error_type="RenderError",
+            suggestion="Try specifying explicit x and y column names, or use the data_summarizer tool to inspect the data shape first.",
+        )
 
 
 chart_generator_tool = StructuredTool.from_function(

@@ -14,6 +14,8 @@ from typing import Any, Literal
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
+from app.visualization.data_shapes import coerce_rows
+
 logger = logging.getLogger(__name__)
 
 ChartType = Literal["bar", "line", "scatter", "pie", "area", "histogram", "heatmap", "funnel"]
@@ -167,7 +169,7 @@ def _build_figure(
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def smart_chart(
-    data: list[dict[str, Any]],
+    data: Any,
     question: str = "",
     x: str | None = None,
     y: str | None = None,
@@ -183,12 +185,15 @@ def smart_chart(
         or {"error": str}
     """
     try:
+        rows = coerce_rows(data)
         if not data:
             return {"error": "No data provided for chart generation."}
+        if not rows:
+            return {"error": "Chart data must be rows or a SQL result object containing rows."}
 
-        numeric = _numeric_columns(data)
-        categorical = _categorical_columns(data)
-        x_col = x or (categorical[0] if categorical else next(iter(data[0].keys())))
+        numeric = _numeric_columns(rows)
+        categorical = _categorical_columns(rows)
+        x_col = x or (categorical[0] if categorical else next(iter(rows[0].keys())))
         y_col = y or (numeric[0] if numeric else None)
 
         if not y_col and chart_type not in ("histogram",):
@@ -196,11 +201,11 @@ def smart_chart(
 
         # Resolve chart type
         if chart_type == "auto":
-            resolved: ChartType = select_chart_type(data, question, x_col)
+            resolved: ChartType = select_chart_type(rows, question, x_col)
         else:
             resolved = chart_type  # type: ignore[assignment]
 
-        figure = _build_figure(data, resolved, x_col, y_col or x_col, title, color_col)
+        figure = _build_figure(rows, resolved, x_col, y_col or x_col, title, color_col)
         return {"chart_type": resolved, "figure": figure}
 
     except Exception as exc:
@@ -211,7 +216,7 @@ def smart_chart(
 # ── LangChain StructuredTool ──────────────────────────────────────────────────
 
 class DynamicChartInput(BaseModel):
-    data: list[dict[str, Any]] = Field(..., description="Tabular query result rows.")
+    data: Any = Field(..., description="Tabular rows or a SQL result object containing rows.")
     question: str = Field("", description="Original user question to help infer chart type.")
     x: str | None = Field(None, description="X-axis / label column.")
     y: str | None = Field(None, description="Y-axis / value column.")

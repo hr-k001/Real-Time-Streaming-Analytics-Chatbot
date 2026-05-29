@@ -16,6 +16,7 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from app.visualization.dynamic_chart import smart_chart, _numeric_columns, _categorical_columns
+from app.visualization.data_shapes import coerce_rows
 
 logger = logging.getLogger(__name__)
 
@@ -119,10 +120,10 @@ def build_multi_series_figure(
 # ── LangChain StructuredTool ──────────────────────────────────────────────────
 
 class PlotlyVizInput(BaseModel):
-    data: list[dict[str, Any]] = Field(..., description="Tabular query result rows.")
+    data: Any = Field(..., description="Tabular rows or a SQL result object containing rows.")
     question: str = Field("", description="User question to aid chart type selection.")
     x: str | None = Field(None, description="X-axis column.")
-    y_cols: list[str] = Field(default_factory=list, description="One or more Y-axis columns (multi-series if >1).")
+    y_cols: list[str] | None = Field(None, description="One or more Y-axis columns (multi-series if >1). Optional — auto-detected if omitted.")
     chart_type: str = Field("auto", description="Chart type or 'auto'.")
     title: str = Field("Analytics Result", description="Chart title.")
     palette: str = Field("default", description="Color palette: default, blue, green, warm, pastel.")
@@ -130,7 +131,7 @@ class PlotlyVizInput(BaseModel):
 
 
 def build_plotly_viz(
-    data: list[dict[str, Any]],
+    data: Any,
     question: str = "",
     x: str | None = None,
     y_cols: list[str] | None = None,
@@ -146,26 +147,29 @@ def build_plotly_viz(
     - Otherwise delegates to smart_chart for automatic type selection.
     """
     try:
+        rows = coerce_rows(data)
         if not data:
             return {"error": "No data provided."}
+        if not rows:
+            return {"error": "Visualization data must be rows or a SQL result object containing rows."}
 
         if y_cols and len(y_cols) > 1:
-            numeric = _numeric_columns(data)
-            categorical = _categorical_columns(data)
-            x_col = x or (categorical[0] if categorical else next(iter(data[0].keys())))
+            numeric = _numeric_columns(rows)
+            categorical = _categorical_columns(rows)
+            x_col = x or (categorical[0] if categorical else next(iter(rows[0].keys())))
             ct: Literal["bar", "line", "scatter"] = (
                 "line" if chart_type in ("line", "area") else
                 "scatter" if chart_type == "scatter" else "bar"
             )
             figure = build_multi_series_figure(
-                rows=data, x_col=x_col, y_cols=y_cols,
+                rows=rows, x_col=x_col, y_cols=y_cols,
                 chart_type=ct, title=title, palette=palette, dark_mode=dark_mode,
             )
             return {"chart_type": ct, "multi_series": True, "figure": figure}
 
         # Single series via smart_chart
         y = y_cols[0] if y_cols else None
-        result = smart_chart(data=data, question=question, x=x, y=y,
+        result = smart_chart(data=rows, question=question, x=x, y=y,
                              chart_type=chart_type, title=title)
         if "error" in result:
             return result

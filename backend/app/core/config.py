@@ -14,6 +14,9 @@ class Settings(BaseSettings):
 
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_MAX_RETRIES: int = 0
+    AGENT_RECURSION_LIMIT: int = 8
+    CHAT_HISTORY_MESSAGES: int = 4
 
     AZURE_SQL_SERVER: str = "streaming-analytic.database.windows.net"
     AZURE_SQL_DATABASE: str = "real-time-chatbot"
@@ -29,8 +32,11 @@ class Settings(BaseSettings):
     CACHE_BACKEND: Literal["memory"] = "memory"
     CACHE_TTL_SECONDS: int = 300
     CHAT_TTL_SECONDS: int = 86400
+    CACHE_REFRESH_INTERVAL_SECONDS: int = 60
+    CACHE_REFRESH_THRESHOLD_PCT: float = 0.8
 
     EXPORT_DIR: str = "exports"
+    REPORTS_DIR: str = "reports"
 
     model_config = SettingsConfigDict(
         env_file=".env",

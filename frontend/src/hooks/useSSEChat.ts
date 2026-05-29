@@ -197,5 +197,14 @@ export function useSSEChat() {
     setState({ chatId: null, messages: [], isStreaming: false, error: null });
   }, []);
 
-  return { ...state, sendMessage, stop, clear };
+  const loadSession = useCallback((sessionChatId: string, sessionMessages: { role: string; content: string }[]) => {
+    const mapped: Message[] = sessionMessages.map(m => ({
+      id: uid(),
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+    }));
+    setState({ chatId: sessionChatId, messages: mapped, isStreaming: false, error: null });
+  }, []);
+
+  return { ...state, sendMessage, stop, clear, loadSession };
 }

@@ -3,12 +3,26 @@ import logging
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from app.agent import history_store
 from app.agent.graph import run_chat
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.streaming.sse_streamer import stream_chat_response
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+
+@router.get("/history")
+def get_chat_history():
+    return {"sessions": history_store.list_sessions()}
+
+
+@router.get("/{chat_id}")
+def get_chat_detail(chat_id: str):
+    session = history_store.get_session(chat_id)
+    if session is None:
+        return JSONResponse(status_code=404, content={"error": "Session not found"})
+    return session
 
 
 @router.post("", response_model=ChatResponse)

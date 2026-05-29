@@ -4,10 +4,30 @@ import { useSSEChat } from '../hooks/useSSEChat';
 import { MessageBubble } from './MessageBubble';
 import { VoiceInput } from './VoiceInput';
 import { FileUpload } from './FileUpload';
-import { generateReport } from '../lib/api';
+import { generateReport, getChatSession } from '../lib/api';
 
-export function ChatInterface() {
-  const { chatId, messages, isStreaming, error, sendMessage, stop, clear } = useSSEChat();
+interface Props {
+  activeChatId?: string | null;
+  onChatIdChange?: (chatId: string) => void;
+}
+
+export function ChatInterface({ activeChatId, onChatIdChange }: Props) {
+  const { chatId, messages, isStreaming, error, sendMessage, stop, clear, loadSession } = useSSEChat();
+
+  // Load historical session when activeChatId changes
+  useEffect(() => {
+    if (!activeChatId || activeChatId === chatId) return;
+    getChatSession(activeChatId)
+      .then(session => loadSession(session.chat_id, session.messages))
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChatId]);
+
+  // Propagate new chatId up after SSE assigns it
+  useEffect(() => {
+    if (chatId && onChatIdChange) onChatIdChange(chatId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId]);
   const [input, setInput] = useState('');
   const [showUpload, setShowUpload] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);

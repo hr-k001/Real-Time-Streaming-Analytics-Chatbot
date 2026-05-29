@@ -15,6 +15,24 @@ async function json<T>(res: Response): Promise<T> {
 
 // ── Chat ───────────────────────────────────────────────────────────────────────
 
+export interface ChatSession {
+  chat_id: string;
+  title: string;
+  last_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatSessionDetail extends ChatSession {
+  messages: { role: string; content: string }[];
+}
+
+export const getChatHistory = (): Promise<{ sessions: ChatSession[] }> =>
+  fetch(`${BASE}/api/chat/history`).then(r => json<{ sessions: ChatSession[] }>(r));
+
+export const getChatSession = (chatId: string): Promise<ChatSessionDetail> =>
+  fetch(`${BASE}/api/chat/${chatId}`).then(r => json<ChatSessionDetail>(r));
+
 export interface ChatResponse {
   chat_id: string;
   answer: string;

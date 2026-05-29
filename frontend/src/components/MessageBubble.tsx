@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Database, BarChart3, Cpu } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { Message, ToolCall } from '../hooks/useSSEChat';
 import { ChartDisplay } from './ChartDisplay';
 
@@ -85,12 +87,18 @@ function AssistantBubble({ msg }: { msg: Message }) {
         style={{ background: 'var(--asst-bg)', color: 'var(--text)' }}
       >
         {msg.content ? (
-          <div
-            className={`prose-chat${msg.isStreaming ? ' cursor-stream' : ''}`}
-            dangerouslySetInnerHTML={{
-              __html: formatContent(msg.content),
-            }}
-          />
+          <div className={`prose-chat${msg.isStreaming ? ' cursor-stream' : ''}`}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                a: ({ node: _node, ...props }) => (
+                  <a {...props} target="_blank" rel="noopener noreferrer" />
+                ),
+              }}
+            >
+              {msg.content}
+            </ReactMarkdown>
+          </div>
         ) : (
           msg.isStreaming && (
             <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--text-3)' }}>
@@ -118,17 +126,6 @@ function AssistantBubble({ msg }: { msg: Message }) {
       </div>
     </div>
   );
-}
-
-// Very lightweight markdown→html: bold, inline code, newlines → <br>
-function formatContent(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\n/g, '<br/>');
 }
 
 export function MessageBubble({ msg }: { msg: Message }) {
